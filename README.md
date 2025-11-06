@@ -374,10 +374,197 @@ If any build or test fails:
    - Deployment summary with details
    - All artifacts are available
 
+## 🤖 Claude Code Configuration
+
+This repository includes custom Claude Code instructions and reusable agents to enhance your development workflow.
+
+### Custom Instructions
+
+The `.claude/claude.md` file contains instructions that Claude automatically follows when working in this repository:
+
+**Automatic behaviors:**
+- 🔍 **Proactive issue monitoring**: Checks for CI/CD failures on every session
+- 📋 **Automatic task management**: Creates and tracks tasks for complex work
+- 🐛 **Smart error handling**: Automatically addresses CI failures
+- 📱 **Mobile-optimized responses**: Concise, clear, actionable feedback
+
+**What Claude will do automatically:**
+1. Check for open issues with `ci-failure` label
+2. Review recent workflow runs
+3. Check for pending PRs
+4. Add any failures to the task list
+5. Offer to fix issues proactively
+
+### Reusable Agents
+
+Three specialized agents are available with domain-specific expertise:
+
+#### 👨‍💻 Developer Agent (`.claude/agents/developer.md`)
+
+**Best for:**
+- Implementing new features
+- Fixing bugs
+- Writing tests
+- Code optimization
+
+**Expertise:**
+- Node.js and Express
+- JavaScript best practices
+- Testing and TDD
+- Clean code principles
+
+**Example usage:**
+```
+User: "Act as the developer agent and add a new /api/stats endpoint"
+
+Developer Agent will:
+- Follow existing patterns
+- Add proper error handling
+- Write tests for the endpoint
+- Use task tracking
+- Ensure code quality
+```
+
+#### 👔 Technical Lead Agent (`.claude/agents/lead.md`)
+
+**Best for:**
+- Code reviews
+- Architecture decisions
+- Best practices guidance
+- Technical mentoring
+
+**Expertise:**
+- System design patterns
+- Security review
+- Performance optimization
+- Technical debt management
+
+**Example usage:**
+```
+User: "Act as the lead agent and review my latest PR"
+
+Lead Agent will:
+- Review code quality
+- Check for security issues
+- Verify best practices
+- Suggest improvements
+- Evaluate architecture
+```
+
+#### 🚀 DevOps Agent (`.claude/agents/devops.md`)
+
+**Best for:**
+- CI/CD pipeline optimization
+- Docker configuration
+- Deployment strategies
+- Infrastructure work
+
+**Expertise:**
+- GitHub Actions workflows
+- Docker best practices
+- Monitoring and alerting
+- Performance tuning
+
+**Example usage:**
+```
+User: "Act as the devops agent and optimize our Docker image"
+
+DevOps Agent will:
+- Analyze current Dockerfile
+- Implement multi-stage builds
+- Optimize layer caching
+- Add health checks
+- Reduce image size
+```
+
+### How to Use Agents
+
+**Method 1: Explicit request**
+```
+"Act as the [developer/lead/devops] agent and [task]"
+```
+
+**Method 2: Context-based**
+```
+Just ask for what you need:
+- "Add a new feature" → Developer agent behaviors
+- "Review this code" → Lead agent behaviors
+- "Optimize the CI pipeline" → DevOps agent behaviors
+```
+
+**Method 3: Task-specific**
+```
+The agent will automatically switch based on the task:
+- Bug fixes → Developer
+- Architecture decisions → Lead
+- Deployment issues → DevOps
+```
+
+### Agent Switching Example
+
+```
+User: "I need to add user authentication"
+
+Developer Agent:
+- Implements the auth logic
+- Adds validation
+- Writes tests
+
+User: "Can you review my implementation?"
+
+Lead Agent:
+- Reviews security
+- Checks patterns
+- Suggests improvements
+
+User: "Now let's deploy this"
+
+DevOps Agent:
+- Updates CI/CD
+- Adds security scanning
+- Configures deployment
+```
+
+### Customizing Instructions
+
+You can modify the instructions and agents:
+
+```bash
+# Edit main instructions
+.claude/claude.md
+
+# Edit agents
+.claude/agents/developer.md
+.claude/agents/lead.md
+.claude/agents/devops.md
+```
+
+**What you can customize:**
+- Coding standards
+- Workflow preferences
+- Agent behaviors
+- Project-specific rules
+- Team conventions
+
+### Benefits of Custom Instructions
+
+✅ **Consistency**: Same standards across all sessions
+✅ **Proactivity**: Claude monitors and fixes issues automatically
+✅ **Efficiency**: Specialized agents for different tasks
+✅ **Quality**: Built-in best practices and reviews
+✅ **Learning**: Agents teach patterns and techniques
+✅ **Mobile-friendly**: Optimized for phone usage
+
 ## 🏗️ Project Structure
 
 ```
 .
+├── .claude/                    # Claude Code configuration
+│   ├── claude.md              # Custom instructions
+│   └── agents/                # Specialized agents
+│       ├── developer.md       # Developer agent
+│       ├── lead.md           # Technical lead agent
+│       └── devops.md         # DevOps agent
 ├── .github/
 │   └── workflows/
 │       └── ci-cd.yml          # GitHub Actions workflow
