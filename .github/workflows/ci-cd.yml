@@ -8,16 +8,59 @@ on:
   pull_request:
     branches:
       - main
+  pull_request_target:
+    types: [closed]
 
 env:
   DOCKER_IMAGE_NAME: claude-cicd-demo
   NODE_VERSION: '18'
 
 jobs:
+  # Job 0: Setup - Ensure labels exist
+  setup-labels:
+    name: Setup Repository Labels
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - name: Create required labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = [
+              { name: 'automated-pr', color: '0366d6', description: 'Pull request created automatically by CI/CD' },
+              { name: 'claude-code', color: '7057ff', description: 'Created using Claude Code Web' },
+              { name: 'ci-failure', color: 'd73a4a', description: 'CI/CD pipeline failure' },
+              { name: 'automated', color: 'ededed', description: 'Automated action' }
+            ];
+
+            for (const label of labels) {
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name,
+                  color: label.color,
+                  description: label.description
+                });
+                console.log(`Created label: ${label.name}`);
+              } catch (error) {
+                if (error.status === 422) {
+                  console.log(`Label ${label.name} already exists`);
+                } else {
+                  console.log(`Error creating label ${label.name}: ${error.message}`);
+                }
+              }
+            }
+
   # Job 1: Build and Test
   build-and-test:
     name: Build and Test
     runs-on: ubuntu-latest
+    needs: setup-labels
+    outputs:
+      test-status: ${{ steps.test-run.outcome }}
 
     steps:
       - name: Checkout code
@@ -30,25 +73,58 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        id: npm-install
+        run: |
+          echo "📦 Installing dependencies..."
+          npm ci
+          echo "✅ Dependencies installed successfully"
 
       - name: Run tests
-        run: npm test
+        id: test-run
+        continue-on-error: true
+        run: |
+          echo "🧪 Running tests..."
+          npm test 2>&1 | tee test-output.log
+          TEST_EXIT_CODE=${PIPESTATUS[0]}
+          echo "exit-code=$TEST_EXIT_CODE" >> $GITHUB_OUTPUT
+          exit $TEST_EXIT_CODE
 
-      - name: Upload test results
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.test-run.outcome }}" == "success" ]; then
+            echo "✅ All tests passed!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Tests failed!" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Output" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -n 50 test-output.log >> $GITHUB_STEP_SUMMARY || echo "No test output available" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-logs
           path: |
-            test-results/
-            coverage/
+            test-output.log
+            npm-debug.log*
+          retention-days: 7
+
+      - name: Fail if tests failed
+        if: steps.test-run.outcome == 'failure'
+        run: exit 1
 
   # Job 2: Build Docker Image
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
-    needs: build-and-test
+    needs: [setup-labels, build-and-test]
+    outputs:
+      docker-status: ${{ steps.docker-build.outcome }}
 
     steps:
       - name: Checkout code
@@ -58,34 +134,302 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image
+        id: docker-build
+        continue-on-error: true
         run: |
-          docker build -t ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }} .
-          docker build -t ${{ env.DOCKER_IMAGE_NAME }}:latest .
+          echo "🐳 Building Docker image..."
+          docker build -t ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }} . 2>&1 | tee docker-build.log
+          DOCKER_EXIT_CODE=${PIPESTATUS[0]}
+          if [ $DOCKER_EXIT_CODE -eq 0 ]; then
+            docker build -t ${{ env.DOCKER_IMAGE_NAME }}:latest .
+            echo "✅ Docker build successful"
+          else
+            echo "❌ Docker build failed"
+          fi
+          echo "exit-code=$DOCKER_EXIT_CODE" >> $GITHUB_OUTPUT
+          exit $DOCKER_EXIT_CODE
 
       - name: Test Docker image
+        id: docker-test
+        if: steps.docker-build.outcome == 'success'
+        continue-on-error: true
         run: |
+          echo "🧪 Testing Docker container..."
           docker run -d -p 3000:3000 --name test-container ${{ env.DOCKER_IMAGE_NAME }}:latest
           sleep 5
-          curl -f http://localhost:3000/health || exit 1
+
+          # Health check
+          if curl -f http://localhost:3000/health; then
+            echo "✅ Health check passed"
+            HEALTH_STATUS="✅ Passed"
+          else
+            echo "❌ Health check failed"
+            HEALTH_STATUS="❌ Failed"
+          fi
+
+          # Capture logs
+          docker logs test-container > docker-runtime.log 2>&1
+
+          # Cleanup
           docker stop test-container
           docker rm test-container
 
+          # Exit with failure if health check failed
+          if [ "$HEALTH_STATUS" == "❌ Failed" ]; then
+            exit 1
+          fi
+
+      - name: Generate Docker summary
+        if: always()
+        run: |
+          echo "## 🐳 Docker Build Results" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.docker-build.outcome }}" == "success" ]; then
+            echo "✅ Docker image built successfully" >> $GITHUB_STEP_SUMMARY
+            echo "- Image: \`${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Size: \`$(docker images ${{ env.DOCKER_IMAGE_NAME }}:latest --format "{{.Size}}")\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Docker build failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ steps.docker-test.outcome }}" == "success" ]; then
+            echo "✅ Container health check passed" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.docker-test.outcome }}" == "failure" ]; then
+            echo "❌ Container health check failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Save Docker image
+        if: steps.docker-build.outcome == 'success'
         run: docker save ${{ env.DOCKER_IMAGE_NAME }}:latest -o docker-image.tar
 
       - name: Upload Docker image artifact
+        if: steps.docker-build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: docker-image
           path: docker-image.tar
           retention-days: 1
 
-  # Job 3: Create PR (only on feature branches)
+      - name: Upload Docker logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-logs
+          path: |
+            docker-build.log
+            docker-runtime.log
+          retention-days: 7
+
+      - name: Fail if Docker build failed
+        if: steps.docker-build.outcome == 'failure' || steps.docker-test.outcome == 'failure'
+        run: exit 1
+
+  # Job 3: Create Debug Issue on Failure
+  create-debug-issue:
+    name: Create Debug Issue
+    runs-on: ubuntu-latest
+    needs: [setup-labels, build-and-test, build-docker]
+    if: failure() && github.event_name == 'push' && startsWith(github.ref, 'refs/heads/claude/')
+
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download test logs
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: test-logs
+          path: ./logs
+
+      - name: Download Docker logs
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-logs
+          path: ./logs
+
+      - name: Collect system information
+        run: |
+          echo "SYSTEM_INFO<<EOF" >> $GITHUB_ENV
+          echo "- Node Version: $(node --version)" >> $GITHUB_ENV
+          echo "- NPM Version: $(npm --version)" >> $GITHUB_ENV
+          echo "- Docker Version: $(docker --version)" >> $GITHUB_ENV
+          echo "- OS: $(uname -a)" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Create comprehensive debug issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Read log files
+            let testLogs = 'No test logs available';
+            let dockerBuildLogs = 'No Docker build logs available';
+            let dockerRuntimeLogs = 'No Docker runtime logs available';
+
+            try {
+              testLogs = fs.readFileSync('./logs/test-output.log', 'utf8').slice(-3000);
+            } catch (e) {
+              console.log('No test logs found');
+            }
+
+            try {
+              dockerBuildLogs = fs.readFileSync('./logs/docker-build.log', 'utf8').slice(-3000);
+            } catch (e) {
+              console.log('No Docker build logs found');
+            }
+
+            try {
+              dockerRuntimeLogs = fs.readFileSync('./logs/docker-runtime.log', 'utf8').slice(-3000);
+            } catch (e) {
+              console.log('No Docker runtime logs found');
+            }
+
+            // Determine failure type
+            const jobStatus = {
+              tests: '${{ needs.build-and-test.result }}',
+              docker: '${{ needs.build-docker.result }}'
+            };
+
+            let failureType = '🔴 Build Failure';
+            let failureDescription = '';
+
+            if (jobStatus.tests === 'failure') {
+              failureType = '🧪 Test Failure';
+              failureDescription = 'The automated tests failed during the CI/CD pipeline.';
+            } else if (jobStatus.docker === 'failure') {
+              failureType = '🐳 Docker Build/Test Failure';
+              failureDescription = 'The Docker build or container health check failed.';
+            }
+
+            const issueBody = `## ${failureType}
+
+            ${failureDescription}
+
+            ### 📋 Build Information
+
+            - **Branch**: \`${{ github.ref_name }}\`
+            - **Commit**: \`${{ github.sha }}\`
+            - **Workflow Run**: [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - **Triggered By**: @${{ github.actor }}
+            - **Timestamp**: ${new Date().toISOString()}
+
+            ### 🔍 Job Status
+
+            | Job | Status |
+            |-----|--------|
+            | Build & Test | ${jobStatus.tests === 'success' ? '✅ Passed' : '❌ Failed'} |
+            | Docker Build | ${jobStatus.docker === 'success' ? '✅ Passed' : '❌ Failed'} |
+
+            ### 🖥️ Environment Information
+
+            ${process.env.SYSTEM_INFO || 'Not available'}
+
+            ### 📝 Test Logs
+
+            <details>
+            <summary>Click to expand test logs (last 3000 chars)</summary>
+
+            \`\`\`
+            ${testLogs}
+            \`\`\`
+
+            </details>
+
+            ### 🐳 Docker Build Logs
+
+            <details>
+            <summary>Click to expand Docker build logs (last 3000 chars)</summary>
+
+            \`\`\`
+            ${dockerBuildLogs}
+            \`\`\`
+
+            </details>
+
+            ### 🏃 Docker Runtime Logs
+
+            <details>
+            <summary>Click to expand Docker runtime logs (last 3000 chars)</summary>
+
+            \`\`\`
+            ${dockerRuntimeLogs}
+            \`\`\`
+
+            </details>
+
+            ### 🔧 Debugging Tips for Claude Code Web
+
+            1. **Review the logs above** to identify the specific error
+            2. **Check the workflow run** for complete details: [View Workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            3. **Common issues to check**:
+               - Missing dependencies in package.json
+               - Test assertions that need updating
+               - Docker configuration issues
+               - Port conflicts or resource limitations
+            4. **To fix**: Make changes in Claude Code Web and push to the same branch
+            5. **This issue will auto-close** when the branch is successfully merged
+
+            ### 🤖 Claude Code Web Commands
+
+            You can ask Claude to:
+            - "Review the test failures in this issue and fix them"
+            - "Check the Docker build logs and resolve the issue"
+            - "Run the tests locally and show me what's failing"
+
+            ---
+
+            *This issue was automatically created by the CI/CD pipeline. Reply with your questions or fixes!*
+            `;
+
+            // Check for existing open issues for this branch
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'ci-failure,claude-code',
+              per_page: 100
+            });
+
+            const branchIssue = existingIssues.data.find(issue =>
+              issue.title.includes('${{ github.ref_name }}')
+            );
+
+            if (branchIssue) {
+              // Update existing issue with new information
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: branchIssue.number,
+                body: `## 🔄 New Build Failure\n\nAnother build has failed on this branch.\n\n${issueBody}`
+              });
+
+              console.log(`Updated existing issue #${branchIssue.number}`);
+            } else {
+              // Create new issue
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `${failureType}: ${context.payload.ref.replace('refs/heads/', '')}`,
+                body: issueBody,
+                labels: ['ci-failure', 'claude-code', 'automated']
+              });
+
+              console.log(`Created issue #${issue.data.number}`);
+            }
+
+  # Job 4: Create PR (only on feature branches)
   create-pr:
     name: Create Pull Request
     runs-on: ubuntu-latest
-    needs: [build-and-test, build-docker]
-    if: startsWith(github.ref, 'refs/heads/claude/') && github.event_name == 'push'
+    needs: [setup-labels, build-and-test, build-docker]
+    if: success() && startsWith(github.ref, 'refs/heads/claude/') && github.event_name == 'push'
 
     permissions:
       contents: write
@@ -109,41 +453,108 @@ jobs:
             echo "ℹ️ To enable auto-PR creation, create a main branch first."
           fi
 
-      - name: Create Pull Request
+      - name: Get commit summary
+        id: commits
         if: steps.check-main.outputs.exists == 'true'
         run: |
-          gh pr create \
-            --base main \
-            --head ${{ github.ref_name }} \
-            --title "🤖 Auto PR: ${{ github.ref_name }}" \
-            --body "## 🚀 Automated Pull Request
+          COMMIT_COUNT=$(git rev-list --count origin/main..HEAD)
+          echo "count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
 
-          This PR was automatically created by the CI/CD pipeline.
+          echo "COMMIT_LIST<<EOF" >> $GITHUB_OUTPUT
+          git log --oneline origin/main..HEAD | head -10 >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
-          ### ✨ Changes
-          - Feature branch: \`${{ github.ref_name }}\`
-          - Commit: ${{ github.sha }}
+      - name: Create or Update Pull Request
+        if: steps.check-main.outputs.exists == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branchName = context.ref.replace('refs/heads/', '');
+            const commitCount = '${{ steps.commits.outputs.count }}';
+            const commitList = `${{ steps.commits.outputs.COMMIT_LIST }}`;
 
-          ### ✅ CI/CD Status
-          - Build: Passed
-          - Tests: Passed
-          - Docker Build: Passed
+            const prBody = `## 🚀 Automated Pull Request
 
-          ### 📋 Checklist
-          - [x] All tests passing
-          - [x] Docker image built successfully
-          - [x] Health checks passing
+            This PR was automatically created by the CI/CD pipeline.
 
-          **Note:** This was created using Claude Code Web version." \
-            --label "automated-pr,claude-code" || echo "PR may already exist"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            ### ✨ Changes
+            - Feature branch: \`${branchName}\`
+            - Commit: ${context.sha}
+            - Commits in this PR: ${commitCount}
 
-  # Job 4: Deploy (only on main branch after merge)
+            ### 📝 Recent Commits
+            \`\`\`
+            ${commitList}
+            \`\`\`
+
+            ### ✅ CI/CD Status
+            - ✅ Build: Passed
+            - ✅ Tests: Passed
+            - ✅ Docker Build: Passed
+            - ✅ Health Check: Passed
+
+            ### 📋 Checklist
+            - [x] All tests passing
+            - [x] Docker image built successfully
+            - [x] Health checks passing
+            - [x] No CI failures
+
+            ### 🔀 Merge Instructions
+            Once merged, the feature branch will be **automatically deleted** and deployed to production.
+
+            **Created using Claude Code Web** 📱`;
+
+            // Check if PR already exists
+            const { data: existingPRs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${branchName}`,
+              base: 'main',
+              state: 'open'
+            });
+
+            if (existingPRs.length > 0) {
+              // Update existing PR
+              const pr = existingPRs[0];
+              console.log(`✅ PR #${pr.number} already exists, updating it...`);
+
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                body: prBody
+              });
+
+              console.log(`Updated PR #${pr.number}`);
+            } else {
+              // Create new PR
+              console.log('Creating new PR...');
+
+              const { data: newPR } = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🤖 Auto PR: ${branchName}`,
+                head: branchName,
+                base: 'main',
+                body: prBody
+              });
+
+              // Add labels
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: newPR.number,
+                labels: ['automated-pr', 'claude-code']
+              });
+
+              console.log(`✅ Created PR #${newPR.number}`);
+            }
+
+  # Job 5: Deploy (only on main branch after merge)
   deploy:
     name: Deploy Application
     runs-on: ubuntu-latest
-    needs: [build-and-test, build-docker]
+    needs: [setup-labels, build-and-test, build-docker]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
@@ -160,10 +571,12 @@ jobs:
 
       - name: Deploy notification
         run: |
-          echo "🚀 Deploying application..."
-          echo "Image: ${{ env.DOCKER_IMAGE_NAME }}:latest"
-          echo "Commit: ${{ github.sha }}"
-          echo "Branch: ${{ github.ref_name }}"
+          echo "## 🚀 Deployment Started" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ env.DOCKER_IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
 
       # Add your deployment steps here
       # Examples:
@@ -174,5 +587,74 @@ jobs:
 
       - name: Deployment success
         run: |
-          echo "✅ Deployment completed successfully!"
-          echo "Visit: https://your-app-url.com"
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The application has been deployed successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🌐 **Visit**: https://your-app-url.com" >> $GITHUB_STEP_SUMMARY
+
+  # Job 6: Cleanup Merged Branches
+  cleanup-branch:
+    name: Cleanup Merged Branch
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'claude/')
+
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - name: Delete merged branch
+        run: |
+          echo "🧹 Cleaning up merged branch: ${{ github.event.pull_request.head.ref }}"
+          gh api \
+            --method DELETE \
+            -H "Accept: application/vnd.github+json" \
+            /repos/${{ github.repository }}/git/refs/heads/${{ github.event.pull_request.head.ref }}
+          echo "✅ Branch deleted successfully"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Close related issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Find and close any CI failure issues for this branch
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'ci-failure',
+              per_page: 100
+            });
+
+            const branchName = context.payload.pull_request.head.ref;
+
+            for (const issue of issues.data) {
+              if (issue.title.includes(branchName)) {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: 'closed'
+                });
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `✅ This issue has been resolved! The PR was merged and the branch has been deleted.\n\nMerged PR: #${context.payload.pull_request.number}`
+                });
+
+                console.log(`Closed issue #${issue.number}`);
+              }
+            }
+
+      - name: Post cleanup summary
+        run: |
+          echo "## 🧹 Cleanup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Merged PR: #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 🗑️ Deleted branch: \`${{ github.event.pull_request.head.ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎉 Changes deployed to main" >> $GITHUB_STEP_SUMMARY
