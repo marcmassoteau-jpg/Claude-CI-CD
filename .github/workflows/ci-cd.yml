@@ -32,6 +32,8 @@ jobs:
               { name: 'automated-pr', color: '0366d6', description: 'Pull request created automatically by CI/CD' },
               { name: 'claude-code', color: '7057ff', description: 'Created using Claude Code Web' },
               { name: 'ci-failure', color: 'd73a4a', description: 'CI/CD pipeline failure' },
+              { name: 'cleanup-failed', color: 'f9d0c4', description: 'Branch cleanup failed after merge' },
+              { name: 'needs-attention', color: 'fbca04', description: 'Requires manual intervention' },
               { name: 'automated', color: 'ededed', description: 'Automated action' }
             ];
 
@@ -605,7 +607,92 @@ jobs:
       issues: write
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check if branch is default branch
+        id: check-default
+        run: |
+          DEFAULT_BRANCH=$(gh api repos/${{ github.repository }} --jq '.default_branch')
+          BRANCH_TO_DELETE="${{ github.event.pull_request.head.ref }}"
+
+          echo "Default branch: $DEFAULT_BRANCH"
+          echo "Branch to delete: $BRANCH_TO_DELETE"
+
+          if [ "$BRANCH_TO_DELETE" == "$DEFAULT_BRANCH" ]; then
+            echo "is_default=true" >> $GITHUB_OUTPUT
+            echo "⚠️ WARNING: Cannot delete default branch!"
+          else
+            echo "is_default=false" >> $GITHUB_OUTPUT
+            echo "✅ Safe to delete branch"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create issue for default branch problem
+        if: steps.check-default.outputs.is_default == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branchName = context.payload.pull_request.head.ref;
+
+            const issueBody = `## ⚠️ Default Branch Cleanup Issue
+
+            The branch \`${branchName}\` was merged but cannot be automatically deleted because it is currently set as the default branch.
+
+            ### 🔍 Problem
+
+            - **Branch**: \`${branchName}\`
+            - **PR**: #${context.payload.pull_request.number}
+            - **Status**: Merged successfully
+            - **Issue**: Branch is set as the default branch and cannot be deleted
+
+            ### 🔧 How to Fix
+
+            **You need to change the default branch manually:**
+
+            1. Go to **Settings** > **Branches**
+            2. Under "Default branch", click the switch/edit button
+            3. Select \`main\` as the default branch
+            4. Click "Update" and confirm
+            5. Once done, manually delete the \`${branchName}\` branch:
+               \`\`\`bash
+               git push origin --delete ${branchName}
+               \`\`\`
+
+            ### 📋 Why This Happened
+
+            The feature branch became the default branch instead of \`main\`. This can happen when:
+            - The repository was created with the feature branch
+            - The default branch was manually changed
+            - \`main\` branch didn't exist when the feature branch was created
+
+            ### ✅ Prevention
+
+            Always ensure \`main\` is the default branch before merging PRs.
+
+            ### 🔗 Related
+
+            - Merged PR: #${context.payload.pull_request.number}
+            - Workflow run: [View Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            ---
+
+            *This issue was automatically created because branch cleanup failed. Once you fix the default branch, close this issue.*
+            `;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `⚠️ Cannot delete default branch: ${branchName}`,
+              body: issueBody,
+              labels: ['cleanup-failed', 'automated', 'needs-attention']
+            });
+
       - name: Delete merged branch
+        if: steps.check-default.outputs.is_default == 'false'
+        id: delete-branch
+        continue-on-error: true
         run: |
           echo "🧹 Cleaning up merged branch: ${{ github.event.pull_request.head.ref }}"
           gh api \
@@ -616,7 +703,71 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Create issue on deletion failure
+        if: steps.check-default.outputs.is_default == 'false' && steps.delete-branch.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branchName = context.payload.pull_request.head.ref;
+
+            const issueBody = `## 🐛 Branch Cleanup Failed
+
+            Failed to delete merged branch \`${branchName}\` after PR merge.
+
+            ### 📋 Details
+
+            - **Branch**: \`${branchName}\`
+            - **PR**: #${context.payload.pull_request.number}
+            - **Status**: Merged successfully
+            - **Cleanup**: ❌ Failed
+
+            ### 🔍 Possible Causes
+
+            1. **Permission issue**: Workflow may not have delete permissions
+            2. **Branch protection**: Branch may have protection rules
+            3. **API rate limit**: GitHub API may be rate limited
+            4. **Network issue**: Temporary connection problem
+
+            ### 🔧 Manual Cleanup
+
+            You can manually delete the branch:
+
+            \`\`\`bash
+            # Delete remote branch
+            git push origin --delete ${branchName}
+
+            # Or using GitHub CLI
+            gh api --method DELETE /repos/${{ github.repository }}/git/refs/heads/${branchName}
+
+            # Or from GitHub UI
+            # Go to: https://github.com/${{ github.repository }}/branches
+            # Find the branch and click the trash icon
+            \`\`\`
+
+            ### 📊 Workflow Details
+
+            - Workflow run: [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - Check the "Cleanup Merged Branch" job for error details
+
+            ### ✅ After Manual Cleanup
+
+            Once you've manually deleted the branch, close this issue.
+
+            ---
+
+            *This issue was automatically created because branch cleanup failed.*
+            `;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🐛 Cleanup failed: ${branchName}`,
+              body: issueBody,
+              labels: ['cleanup-failed', 'automated']
+            });
+
       - name: Close related issues
+        if: steps.check-default.outputs.is_default == 'false' && steps.delete-branch.outcome == 'success'
         uses: actions/github-script@v7
         with:
           script: |
@@ -652,9 +803,20 @@ jobs:
             }
 
       - name: Post cleanup summary
+        if: always()
         run: |
-          echo "## 🧹 Cleanup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧹 Cleanup Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Merged PR: #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
-          echo "- 🗑️ Deleted branch: \`${{ github.event.pull_request.head.ref }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- 🎉 Changes deployed to main" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.check-default.outputs.is_default }}" == "true" ]; then
+            echo "- ⚠️ Branch is default branch - cannot delete automatically" >> $GITHUB_STEP_SUMMARY
+            echo "- 📋 Issue created with manual cleanup instructions" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.delete-branch.outcome }}" == "success" ]; then
+            echo "- 🗑️ Deleted branch: \`${{ github.event.pull_request.head.ref }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Cleanup successful" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ Branch deletion failed" >> $GITHUB_STEP_SUMMARY
+            echo "- 📋 Issue created with troubleshooting steps" >> $GITHUB_STEP_SUMMARY
+          fi
+
