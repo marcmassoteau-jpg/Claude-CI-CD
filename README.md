@@ -177,7 +177,16 @@ graph TB
    - Go to Settings > Actions > General
    - Allow all actions and reusable workflows
 
-4. **Configure branch protection** (recommended)
+4. **Configure Workflow Permissions** (IMPORTANT!)
+   - Go to Settings > Actions > General
+   - Scroll down to "Workflow permissions"
+   - Select "Read and write permissions"
+   - ✅ Check "Allow GitHub Actions to create and approve pull requests"
+   - Click "Save"
+
+   **Why this is needed**: The workflow automatically creates pull requests and issues. Without these permissions, you'll see errors like "GitHub Actions is not permitted to create or approve pull requests".
+
+5. **Configure branch protection** (recommended)
    - Go to Settings > Branches
    - Add branch protection rule for `main`
    - Require pull request reviews before merging
@@ -606,14 +615,45 @@ ls -la
 - Review .dockerignore file
 - Check for network/registry issues
 
+### Permission Error: "GitHub Actions is not permitted to create or approve pull requests"
+
+**Error message:**
+```
+pull request create failed: GraphQL: GitHub Actions is not permitted
+to create or approve pull requests (createPullRequest)
+```
+
+**Solution:**
+
+This error occurs when workflow permissions aren't properly configured. Follow these steps:
+
+1. **Go to repository Settings**
+2. **Navigate to**: Actions > General
+3. **Scroll down to**: "Workflow permissions" section
+4. **Select**: "Read and write permissions"
+5. **Check the box**: ✅ "Allow GitHub Actions to create and approve pull requests"
+6. **Click**: "Save"
+
+**Alternative Solution (already implemented):**
+
+The latest workflow version uses the GitHub API directly instead of `gh` CLI, which should work with the standard permissions. If you still see errors:
+- Ensure the workflow has `pull-requests: write` permission (already set)
+- Ensure the workflow has `contents: write` permission (already set)
+- Check that Actions are enabled in your repository
+
+**After fixing:**
+- Trigger the workflow again by pushing a new commit
+- The PR should be created automatically
+
 ### PR Not Created Automatically
 
 **Possible reasons:**
 
-1. **Build failed** - Check for auto-created issue with details
-2. **Main branch missing** - Workflow will skip PR creation with helpful message
-3. **PR already exists** - Workflow updates existing PR instead
-4. **Wrong branch name** - Must start with `claude/`
+1. **Permission error** - See section above about workflow permissions
+2. **Build failed** - Check for auto-created issue with details
+3. **Main branch missing** - Workflow will skip PR creation with helpful message
+4. **PR already exists** - Workflow updates existing PR instead
+5. **Wrong branch name** - Must start with `claude/`
 
 **Verification steps:**
 ```bash
@@ -626,6 +666,12 @@ git branch
 # Check for existing PR
 # Visit: https://github.com/your-username/repo/pulls
 ```
+
+**Check workflow logs:**
+1. Go to Actions tab
+2. Click on the failed workflow run
+3. Click on "Create Pull Request" job
+4. Look for error messages
 
 ### Branch Not Deleted After Merge
 

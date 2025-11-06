@@ -464,84 +464,91 @@ jobs:
           git log --oneline origin/main..HEAD | head -10 >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Create Pull Request
+      - name: Create or Update Pull Request
         if: steps.check-main.outputs.exists == 'true'
-        run: |
-          # Check if PR already exists
-          EXISTING_PR=$(gh pr list --head ${{ github.ref_name }} --base main --json number --jq '.[0].number')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branchName = context.ref.replace('refs/heads/', '');
+            const commitCount = '${{ steps.commits.outputs.count }}';
+            const commitList = `${{ steps.commits.outputs.COMMIT_LIST }}`;
 
-          if [ -n "$EXISTING_PR" ]; then
-            echo "✅ PR #$EXISTING_PR already exists, updating it..."
-            gh pr edit $EXISTING_PR --body "## 🚀 Automated Pull Request
+            const prBody = `## 🚀 Automated Pull Request
 
-          This PR was automatically created by the CI/CD pipeline.
+            This PR was automatically created by the CI/CD pipeline.
 
-          ### ✨ Changes
-          - Feature branch: \`${{ github.ref_name }}\`
-          - Commit: ${{ github.sha }}
-          - Commits in this PR: ${{ steps.commits.outputs.count }}
+            ### ✨ Changes
+            - Feature branch: \`${branchName}\`
+            - Commit: ${context.sha}
+            - Commits in this PR: ${commitCount}
 
-          ### 📝 Recent Commits
-          \`\`\`
-          ${{ steps.commits.outputs.COMMIT_LIST }}
-          \`\`\`
+            ### 📝 Recent Commits
+            \`\`\`
+            ${commitList}
+            \`\`\`
 
-          ### ✅ CI/CD Status
-          - ✅ Build: Passed
-          - ✅ Tests: Passed
-          - ✅ Docker Build: Passed
-          - ✅ Health Check: Passed
+            ### ✅ CI/CD Status
+            - ✅ Build: Passed
+            - ✅ Tests: Passed
+            - ✅ Docker Build: Passed
+            - ✅ Health Check: Passed
 
-          ### 📋 Checklist
-          - [x] All tests passing
-          - [x] Docker image built successfully
-          - [x] Health checks passing
-          - [x] No CI failures
+            ### 📋 Checklist
+            - [x] All tests passing
+            - [x] Docker image built successfully
+            - [x] Health checks passing
+            - [x] No CI failures
 
-          ### 🔀 Merge Instructions
-          Once merged, the feature branch will be **automatically deleted** and deployed to production.
+            ### 🔀 Merge Instructions
+            Once merged, the feature branch will be **automatically deleted** and deployed to production.
 
-          **Created using Claude Code Web** 📱"
-          else
-            echo "Creating new PR..."
-            gh pr create \
-              --base main \
-              --head ${{ github.ref_name }} \
-              --title "🤖 Auto PR: ${{ github.ref_name }}" \
-              --body "## 🚀 Automated Pull Request
+            **Created using Claude Code Web** 📱`;
 
-          This PR was automatically created by the CI/CD pipeline.
+            // Check if PR already exists
+            const { data: existingPRs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${branchName}`,
+              base: 'main',
+              state: 'open'
+            });
 
-          ### ✨ Changes
-          - Feature branch: \`${{ github.ref_name }}\`
-          - Commit: ${{ github.sha }}
-          - Commits in this PR: ${{ steps.commits.outputs.count }}
+            if (existingPRs.length > 0) {
+              // Update existing PR
+              const pr = existingPRs[0];
+              console.log(`✅ PR #${pr.number} already exists, updating it...`);
 
-          ### 📝 Recent Commits
-          \`\`\`
-          ${{ steps.commits.outputs.COMMIT_LIST }}
-          \`\`\`
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                body: prBody
+              });
 
-          ### ✅ CI/CD Status
-          - ✅ Build: Passed
-          - ✅ Tests: Passed
-          - ✅ Docker Build: Passed
-          - ✅ Health Check: Passed
+              console.log(`Updated PR #${pr.number}`);
+            } else {
+              // Create new PR
+              console.log('Creating new PR...');
 
-          ### 📋 Checklist
-          - [x] All tests passing
-          - [x] Docker image built successfully
-          - [x] Health checks passing
-          - [x] No CI failures
+              const { data: newPR } = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🤖 Auto PR: ${branchName}`,
+                head: branchName,
+                base: 'main',
+                body: prBody
+              });
 
-          ### 🔀 Merge Instructions
-          Once merged, the feature branch will be **automatically deleted** and deployed to production.
+              // Add labels
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: newPR.number,
+                labels: ['automated-pr', 'claude-code']
+              });
 
-          **Created using Claude Code Web** 📱" \
-              --label "automated-pr,claude-code"
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              console.log(`✅ Created PR #${newPR.number}`);
+            }
 
   # Job 5: Deploy (only on main branch after merge)
   deploy:
