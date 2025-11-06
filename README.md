@@ -11,6 +11,23 @@ A complete demonstration of using **Claude Code Web Version** (accessible from m
 
 > **🎯 Perfect for**: Mobile development, quick bug fixes, coding from anywhere, learning CI/CD workflows
 
+---
+
+> ### ⚠️ Quick Start - Required Setup
+>
+> Before using this workflow, you **must** enable two settings in your repository:
+>
+> 1. Go to **Settings > Actions > General > Workflow permissions**
+> 2. ✅ Select **"Read and write permissions"**
+> 3. ✅ Check **"Allow GitHub Actions to create and approve pull requests"**
+> 4. Click **Save**
+>
+> **Without these settings, the workflow will fail with permission errors!**
+>
+> See [Step 4 in Getting Started](#-getting-started) for detailed instructions.
+
+---
+
 ## 📑 Table of Contents
 
 - [📊 Pipeline Status & Quick Links](#-pipeline-status--quick-links)
@@ -177,14 +194,51 @@ graph TB
    - Go to Settings > Actions > General
    - Allow all actions and reusable workflows
 
-4. **Configure Workflow Permissions** (IMPORTANT!)
-   - Go to Settings > Actions > General
-   - Scroll down to "Workflow permissions"
-   - Select "Read and write permissions"
-   - ✅ Check "Allow GitHub Actions to create and approve pull requests"
-   - Click "Save"
+4. **Configure Workflow Permissions** (⚠️ CRITICAL - Required for PR creation!)
 
-   **Why this is needed**: The workflow automatically creates pull requests and issues. Without these permissions, you'll see errors like "GitHub Actions is not permitted to create or approve pull requests".
+   Navigate to: **Settings > Actions > General**
+
+   Scroll down to the **"Workflow permissions"** section:
+
+   **Step A: Set Permission Level**
+   - ⚪ Read repository contents and packages permissions (default)
+   - 🔘 **Select: "Read and write permissions"** ← Click this radio button
+
+   **Step B: Enable PR Creation**
+   - ✅ **Check: "Allow GitHub Actions to create and approve pull requests"** ← Must be checked!
+
+   **Step C: Save**
+   - Click **"Save"** button at the bottom
+
+   ---
+
+   **Visual Guide:**
+   ```
+   Workflow permissions
+   ┌──────────────────────────────────────────────────────┐
+   │ ⚪ Read repository contents and packages permissions │
+   │ 🔘 Read and write permissions            ← Select   │
+   │                                                       │
+   │ ✅ Allow GitHub Actions to create and    ← Check    │
+   │    approve pull requests                             │
+   │                                                       │
+   │ [Save]                                   ← Click     │
+   └──────────────────────────────────────────────────────┘
+   ```
+
+   **⚠️ Both settings are required:**
+   - **"Read and write permissions"** - Allows workflow to push code and create issues
+   - **"Allow GitHub Actions to create PRs"** - Specifically allows PR creation
+
+   **Without these settings, you'll see errors like:**
+   - ❌ "GitHub Actions is not permitted to create or approve pull requests"
+   - ❌ "Resource not accessible by integration"
+
+   **Why these permissions are safe:**
+   - Only applies to workflows in this repository
+   - Workflows still require your explicit code in `.github/workflows/`
+   - You control what the workflows can do
+   - Standard practice for CI/CD automation
 
 5. **Configure branch protection** (recommended)
    - Go to Settings > Branches
@@ -623,27 +677,50 @@ pull request create failed: GraphQL: GitHub Actions is not permitted
 to create or approve pull requests (createPullRequest)
 ```
 
-**Solution:**
+**Root cause:** Workflow permissions are not properly configured.
 
-This error occurs when workflow permissions aren't properly configured. Follow these steps:
+**Solution - Configure BOTH settings:**
 
-1. **Go to repository Settings**
-2. **Navigate to**: Actions > General
-3. **Scroll down to**: "Workflow permissions" section
-4. **Select**: "Read and write permissions"
-5. **Check the box**: ✅ "Allow GitHub Actions to create and approve pull requests"
-6. **Click**: "Save"
+Navigate to: **Settings > Actions > General > Workflow permissions**
 
-**Alternative Solution (already implemented):**
+**✅ Step 1: Select "Read and write permissions"** (radio button)
+- This gives the workflow basic write access
 
-The latest workflow version uses the GitHub API directly instead of `gh` CLI, which should work with the standard permissions. If you still see errors:
-- Ensure the workflow has `pull-requests: write` permission (already set)
-- Ensure the workflow has `contents: write` permission (already set)
-- Check that Actions are enabled in your repository
+**✅ Step 2: Check "Allow GitHub Actions to create and approve pull requests"** (checkbox)
+- This specifically allows PR creation
+- **This must be checked!** Many users miss this step
+
+**✅ Step 3: Click "Save"**
+
+**Visual reference:**
+```
+┌──────────────────────────────────────────────────────┐
+│ ⚪ Read repository contents (default)                │
+│ 🔘 Read and write permissions            ← SELECT   │
+│                                                       │
+│ ✅ Allow GitHub Actions to create and    ← CHECK    │
+│    approve pull requests                  (REQUIRED) │
+│                                                       │
+│ [Save]                                    ← CLICK    │
+└──────────────────────────────────────────────────────┘
+```
+
+**Why both are needed:**
+- Setting 1 (Read and write) = General permission level
+- Setting 2 (Allow create PRs) = Specific PR creation permission
+- **Both must be enabled** for the workflow to create PRs
 
 **After fixing:**
-- Trigger the workflow again by pushing a new commit
-- The PR should be created automatically
+1. Save the settings
+2. Push a new commit to trigger the workflow
+3. PR should be created automatically
+4. Check Actions tab to verify success
+
+**Still seeing errors?**
+- Verify both checkboxes are set correctly
+- Ensure Actions are enabled: Settings > Actions > General > "Allow all actions"
+- Check workflow run logs for specific error messages
+- See full setup guide in [Getting Started](#-getting-started) section
 
 ### PR Not Created Automatically
 
