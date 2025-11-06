@@ -34,6 +34,8 @@ jobs:
               { name: 'ci-failure', color: 'd73a4a', description: 'CI/CD pipeline failure' },
               { name: 'cleanup-failed', color: 'f9d0c4', description: 'Branch cleanup failed after merge' },
               { name: 'needs-attention', color: 'fbca04', description: 'Requires manual intervention' },
+              { name: 'auto-fix', color: '1d76db', description: 'Automatically fixed by Claude' },
+              { name: 'auto-fix-in-progress', color: 'c5def5', description: 'Auto-fix is being attempted' },
               { name: 'automated', color: 'ededed', description: 'Automated action' }
             ];
 

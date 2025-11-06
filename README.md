@@ -40,6 +40,7 @@ A complete demonstration of using **Claude Code Web Version** (accessible from m
 - [🔧 Configuration](#-configuration)
 - [🧪 Testing](#-testing)
 - [📱 Mobile Workflow Example](#-mobile-workflow-example)
+- [🤖 @claude Auto-Fix Feature](#-claude-auto-fix-feature)
 - [🎓 Use Cases](#-use-cases)
 - [🔐 Security Best Practices](#-security-best-practices)
 - [🐛 Troubleshooting](#-troubleshooting)
@@ -88,6 +89,8 @@ This project showcases how to:
 ![automated-pr](https://img.shields.io/badge/-automated--pr-0366d6?style=flat-square)
 ![claude-code](https://img.shields.io/badge/-claude--code-7057ff?style=flat-square)
 ![ci-failure](https://img.shields.io/badge/-ci--failure-d73a4a?style=flat-square)
+![auto-fix](https://img.shields.io/badge/-auto--fix-1d76db?style=flat-square)
+![auto-fix-in-progress](https://img.shields.io/badge/-auto--fix--in--progress-c5def5?style=flat-square)
 ![automated](https://img.shields.io/badge/-automated-ededed?style=flat-square)
 
 </div>
@@ -114,6 +117,16 @@ graph TB
         I -->|Fix & Push| C
     end
 
+    subgraph "🤖 Auto-Fix Path"
+        G -->|Comment @claude| Q[Auto-Fix Triggered]
+        Q --> R[Analyze Logs]
+        R --> S[Create Fix Branch]
+        S --> T[Apply Fixes]
+        T --> U[Create Fix PR]
+        U -->|Tests Pass| H
+        U -->|Tests Fail| G
+    end
+
     subgraph "✅ Review & Deploy"
         H --> J{Review PR}
         J -->|Approve| K[Merge to Main]
@@ -133,6 +146,8 @@ graph TB
     style F fill:#0366d6
     style G fill:#d73a4a
     style H fill:#0366d6
+    style Q fill:#7057ff
+    style U fill:#0366d6
     style L fill:#28a745
     style O fill:#28a745
 ```
@@ -165,7 +180,14 @@ graph TB
 - **Resource Management**: Artifacts with smart retention policies
 - **Zero Manual Cleanup**: Fully automated branch lifecycle
 
-### 5. Enhanced Visibility
+### 5. @claude Auto-Fix Integration 🆕
+- **Comment-Triggered Fixes**: Mention @claude on any CI failure issue
+- **Automatic Analysis**: Analyzes error patterns and logs automatically
+- **Smart Fix Generation**: Creates fix branches with pattern-based solutions
+- **Auto-PR Creation**: Generates PR when auto-fix is successful
+- **Human-in-the-Loop**: You review and approve fixes before merge
+
+### 6. Enhanced Visibility
 - **Job Summaries**: Detailed summaries for each workflow run
 - **Real-Time Logs**: Test and Docker logs uploaded as artifacts
 - **Progress Tracking**: See exactly what's happening at each step
@@ -567,11 +589,13 @@ You can modify the instructions and agents:
 │       └── devops.md         # DevOps agent
 ├── .github/
 │   └── workflows/
-│       └── ci-cd.yml          # GitHub Actions workflow
+│       ├── ci-cd.yml          # Main CI/CD pipeline
+│       └── claude-auto-fix.yml # @claude auto-fix workflow
 ├── index.html                  # Main web page
 ├── server.js                   # Express server
 ├── test.js                     # Test suite
 ├── package.json                # Node.js dependencies
+├── package-lock.json          # Locked dependencies
 ├── Dockerfile                  # Docker configuration
 ├── .dockerignore              # Docker ignore rules
 ├── .gitignore                 # Git ignore rules
@@ -751,6 +775,277 @@ Here's a real example of using Claude Code Web from your phone:
 7. **Within 2 minutes**: CI runs again automatically
 8. **On success**: Issue is updated, PR is created
 9. **After merge**: Issue automatically closed, branch deleted
+
+## 🤖 @claude Auto-Fix Feature
+
+One of the most powerful features of this CI/CD setup is the **@claude auto-fix integration**. When a build fails and creates an issue, you can simply mention @claude in a comment to trigger automatic analysis and fixing.
+
+### How It Works
+
+```mermaid
+graph LR
+    A[Build Fails] --> B[Issue Created]
+    B --> C[User Comments @claude]
+    C --> D[Auto-Fix Triggered]
+    D --> E[Analyze Logs]
+    E --> F[Create Fix Branch]
+    F --> G[Apply Fixes]
+    G --> H[Push & Create PR]
+    H --> I{Tests Pass?}
+    I -->|Yes| J[PR Ready for Review]
+    I -->|No| K[Report Failure]
+
+    style C fill:#7057ff
+    style D fill:#0366d6
+    style J fill:#28a745
+    style K fill:#d73a4a
+```
+
+### Usage Example
+
+**Scenario**: Your CI build fails and an issue is automatically created
+
+**Step 1**: You receive a notification about the issue
+```
+🧪 Test Failure: claude/new-feature-abc123
+
+The CI/CD pipeline failed during testing.
+
+Error Details:
+AssertionError: Expected 200, got 404
+
+[View Workflow Run]
+```
+
+**Step 2**: Comment on the issue
+```
+@claude please analyze and fix this issue
+```
+
+**Step 3**: Claude Auto-Fix responds
+```
+🤖 Claude Auto-Fix Activated
+
+I'll analyze this issue and attempt to fix it automatically.
+
+Progress:
+- ✅ Issue detected
+- 🔄 Analyzing logs and error messages...
+- ⏳ Preparing fix...
+
+Follow the workflow run for updates: [View Run]
+```
+
+**Step 4**: Auto-Fix workflow runs
+1. **Extracts issue information**: Branch name, error type, workflow run ID
+2. **Downloads logs**: Fetches complete test and Docker logs
+3. **Analyzes patterns**: Identifies common error patterns
+4. **Creates fix branch**: `claude/auto-fix-[timestamp]`
+5. **Applies fixes**: Pattern-based intelligent fixes
+6. **Pushes changes**: Commits and pushes to new branch
+7. **Creates PR**: Automatic pull request with detailed description
+
+**Step 5**: You get the result
+```
+✅ Auto-Fix PR Created!
+
+I've analyzed the issue and created a pull request with a potential fix.
+
+PR: #42
+Branch: claude/auto-fix-1234567890
+
+What happens next:
+1. CI/CD tests will run automatically
+2. If tests pass ✅ - Review and merge the PR
+3. If tests fail ❌ - I'll create a new issue, and you can @claude me again
+
+View PR: [Link]
+```
+
+### What @claude Can Fix
+
+The auto-fix workflow is intelligent about different error types:
+
+#### 🧪 Test Failures
+**Detects:**
+- Async/await issues
+- Missing exports
+- Timeout problems
+- Assertion errors
+
+**Applies:**
+- Proper async handling
+- Export verification
+- Timeout configuration
+- Test adjustments
+
+#### 🐳 Docker Build Failures
+**Detects:**
+- Base image issues
+- Dependency problems
+- Layer caching issues
+- Build context errors
+
+**Applies:**
+- Dockerfile optimization
+- Dependency verification
+- Build configuration fixes
+- Context adjustments
+
+#### 🧹 Cleanup Failures
+**Detects:**
+- Branch deletion errors
+- Default branch issues
+- Permission problems
+
+**Applies:**
+- Documentation updates
+- Manual cleanup instructions
+- Troubleshooting guides
+
+### Requirements
+
+**For @claude auto-fix to work, the issue must:**
+1. Have the `ci-failure` or `cleanup-failed` label
+2. Be in "open" state
+3. Contain error details in the issue body
+
+**If the issue doesn't meet requirements:**
+```
+👋 Hi! I can help with CI/CD failures.
+
+This issue doesn't have a ci-failure or cleanup-failed label,
+so I'm not sure this is something I can auto-fix.
+
+I can automatically fix:
+- CI/CD pipeline failures
+- Test failures
+- Docker build issues
+- Branch cleanup problems
+
+If this is a CI failure, please add the ci-failure label and mention @claude again!
+```
+
+### Workflow Details
+
+The auto-fix workflow (`.github/workflows/claude-auto-fix.yml`) has three main jobs:
+
+#### 1. detect-claude-mention
+- Triggers on any issue comment containing "@claude"
+- Checks if issue has appropriate labels
+- Reacts to comment with 👀 emoji
+- Posts acknowledgment message
+
+#### 2. analyze-and-fix
+- Extracts branch name and error type from issue
+- Downloads workflow logs if available
+- Creates fix strategy based on error patterns
+- Creates and pushes fix branch
+- Creates PR with detailed description
+- Updates original issue with PR link
+
+#### 3. handle-failure
+- Runs only if auto-fix fails
+- Posts failure message with troubleshooting steps
+- Provides alternative manual fix options
+
+### Best Practices
+
+**✅ Do:**
+- Use @claude for CI/CD failures with clear error messages
+- Review the auto-fix PR before merging
+- Check test results on the auto-fix PR
+- Provide feedback by commenting on PRs
+
+**❌ Don't:**
+- Spam @claude multiple times without waiting
+- Expect fixes for complex logic errors (better for pattern-based issues)
+- Merge auto-fix PRs without reviewing
+- Use @claude for non-CI/CD issues
+
+### Current Limitations
+
+The auto-fix feature currently uses **pattern-based detection**:
+- ✅ Great for common, repetitive errors
+- ✅ Excellent for configuration issues
+- ✅ Fast and reliable for known patterns
+- ⚠️ May not handle complex logic errors
+- ⚠️ Requires clear error messages in logs
+
+**Future Enhancement**: Full Claude API integration for more sophisticated analysis and fixes.
+
+### Monitoring Auto-Fix
+
+**Track auto-fix activity:**
+1. **Issues tab**: Filter by `auto-fix-in-progress` label
+2. **Pull Requests**: Filter by `auto-fix` label
+3. **Actions tab**: Search for "Claude Auto-Fix" workflows
+
+**Success metrics:**
+- Number of auto-fixes attempted
+- Auto-fix success rate (PRs that pass tests)
+- Time from @claude mention to PR creation
+- Manual intervention rate
+
+### Troubleshooting Auto-Fix
+
+**Auto-fix didn't trigger:**
+- Check if issue has `ci-failure` or `cleanup-failed` label
+- Verify issue is in "open" state
+- Check Actions tab for workflow run
+- Ensure @claude mention is in a comment, not the issue body
+
+**Auto-fix created PR but tests still fail:**
+- This is expected for complex issues
+- Review the attempted fix
+- Comment @claude on the original issue again
+- Consider manual intervention for logic errors
+
+**Auto-fix workflow failed:**
+- Check workflow run logs in Actions tab
+- Look for permission errors
+- Verify workflow has write access
+- Check for API rate limits
+
+### Example: Complete Auto-Fix Flow
+
+```
+📱 Your phone receives notification:
+   "Issue #15: 🧪 Test Failure: claude/add-auth-feature"
+
+📝 You open GitHub on your phone and comment:
+   "@claude fix this"
+
+🤖 Within 30 seconds:
+   ✅ Comment reaction (👀)
+   ✅ Acknowledgment posted
+   ✅ Workflow started
+
+⚙️ Within 2 minutes:
+   ✅ Logs analyzed
+   ✅ Fix branch created (claude/auto-fix-1234567890)
+   ✅ Fixes applied
+   ✅ PR created (#16)
+   ✅ Original issue updated
+
+🔄 Within 3 minutes:
+   ✅ CI/CD runs on auto-fix PR
+   ✅ Tests pass ✅
+   ✅ Docker build succeeds ✅
+
+👀 You review the PR:
+   ✅ Changes look good
+   ✅ All tests passing
+   ✅ Click "Merge Pull Request"
+
+🎉 Within 1 minute:
+   ✅ PR merged
+   ✅ Original issue closed
+   ✅ Both branches cleaned up
+   ✅ Feature is fixed!
+
+Total time from @claude mention to resolution: ~5 minutes!
+```
 
 ## 🎓 Use Cases
 

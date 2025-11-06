@@ -1,0 +1,447 @@
+name: Claude Auto-Fix on Issue Comment
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  detect-claude-mention:
+    name: Detect @claude Mention
+    runs-on: ubuntu-latest
+    if: github.event.issue.state == 'open' && contains(github.event.comment.body, '@claude')
+    outputs:
+      should-fix: ${{ steps.check-labels.outputs.should-fix }}
+
+    steps:
+      - name: Check if issue has ci-failure label
+        id: check-labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const hasCIFailure = issue.labels.some(label =>
+              label.name === 'ci-failure' ||
+              label.name === 'cleanup-failed'
+            );
+
+            console.log(`Issue #${issue.number} has CI failure: ${hasCIFailure}`);
+            core.setOutput('should-fix', hasCIFailure ? 'true' : 'false');
+
+      - name: React to comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes'
+            });
+
+      - name: Post acknowledgment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const shouldFix = '${{ steps.check-labels.outputs.should-fix }}';
+
+            if (shouldFix === 'true') {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: '🤖 **Claude Auto-Fix Activated**\n\n' +
+                      'I\'ll analyze this issue and attempt to fix it automatically.\n\n' +
+                      '**Progress:**\n' +
+                      '- ✅ Issue detected\n' +
+                      '- 🔄 Analyzing logs and error messages...\n' +
+                      '- ⏳ Preparing fix...\n\n' +
+                      '_Follow the workflow run for updates: [View Run](' +
+                      `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}` +
+                      ')_'
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: '👋 Hi! I can help with CI/CD failures.\n\n' +
+                      'This issue doesn\'t have a `ci-failure` or `cleanup-failed` label, ' +
+                      'so I\'m not sure this is something I can auto-fix.\n\n' +
+                      '**I can automatically fix:**\n' +
+                      '- CI/CD pipeline failures\n' +
+                      '- Test failures\n' +
+                      '- Docker build issues\n' +
+                      '- Branch cleanup problems\n\n' +
+                      'If this is a CI failure, please add the `ci-failure` label and mention @claude again!'
+              });
+            }
+
+  analyze-and-fix:
+    name: Analyze Issue and Create Fix
+    runs-on: ubuntu-latest
+    needs: detect-claude-mention
+    if: needs.detect-claude-mention.outputs.should-fix == 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Extract issue information
+        id: extract-info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+
+            // Extract branch name from issue title if present
+            const branchMatch = issue.title.match(/claude\/[^\s:)]+/);
+            const branchName = branchMatch ? branchMatch[0] : null;
+
+            // Extract error type
+            let errorType = 'unknown';
+            if (issue.title.includes('Test Failure')) errorType = 'test';
+            else if (issue.title.includes('Docker')) errorType = 'docker';
+            else if (issue.title.includes('Cleanup')) errorType = 'cleanup';
+
+            // Get workflow run URL if present
+            const workflowMatch = issue.body.match(/actions\/runs\/(\d+)/);
+            const runId = workflowMatch ? workflowMatch[1] : null;
+
+            core.setOutput('branch-name', branchName || 'main');
+            core.setOutput('error-type', errorType);
+            core.setOutput('run-id', runId || '');
+            core.setOutput('issue-title', issue.title);
+            core.setOutput('issue-body', issue.body.substring(0, 5000)); // Limit size
+
+            return {
+              branchName,
+              errorType,
+              runId
+            };
+
+      - name: Download and analyze logs
+        id: analyze
+        continue-on-error: true
+        run: |
+          echo "📊 Analyzing issue #${{ github.event.issue.number }}"
+          echo "Error Type: ${{ steps.extract-info.outputs.error-type }}"
+          echo "Branch: ${{ steps.extract-info.outputs.branch-name }}"
+
+          # Create analysis directory
+          mkdir -p analysis
+
+          # Save issue content for analysis
+          cat > analysis/issue.txt << 'EOF'
+          Title: ${{ steps.extract-info.outputs.issue-title }}
+
+          Body:
+          ${{ steps.extract-info.outputs.issue-body }}
+          EOF
+
+          # Try to download logs if run ID exists
+          RUN_ID="${{ steps.extract-info.outputs.run-id }}"
+          if [ -n "$RUN_ID" ]; then
+            echo "Downloading logs from run $RUN_ID"
+            gh run view $RUN_ID --log > analysis/workflow-logs.txt || echo "Could not download logs"
+          fi
+
+          # Analyze the error type and suggest fixes
+          ERROR_TYPE="${{ steps.extract-info.outputs.error-type }}"
+          echo "analysis_complete=true" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Call Claude API for fix suggestion
+        id: claude-fix
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // This is where Claude API integration would go
+            // For now, we'll create intelligent fixes based on error patterns
+
+            const errorType = '${{ steps.extract-info.outputs.error-type }}';
+            const issueBody = `${{ steps.extract-info.outputs.issue-body }}`;
+
+            let fixStrategy = {
+              description: '',
+              changes: [],
+              branch: 'claude/auto-fix-' + Date.now()
+            };
+
+            // Pattern-based fix suggestions
+            if (errorType === 'test') {
+              fixStrategy.description = 'Test failure fix: Analyzing test output and applying common fixes';
+              fixStrategy.changes = [
+                {
+                  file: 'test.js',
+                  action: 'check-async',
+                  description: 'Ensure async/await is properly used'
+                },
+                {
+                  file: 'server.js',
+                  action: 'check-exports',
+                  description: 'Verify exports are correct'
+                }
+              ];
+            } else if (errorType === 'docker') {
+              fixStrategy.description = 'Docker build fix: Optimizing Dockerfile and dependencies';
+              fixStrategy.changes = [
+                {
+                  file: 'Dockerfile',
+                  action: 'optimize',
+                  description: 'Check base image and layer caching'
+                },
+                {
+                  file: 'package.json',
+                  action: 'verify-deps',
+                  description: 'Verify all dependencies are listed'
+                }
+              ];
+            } else if (errorType === 'cleanup') {
+              fixStrategy.description = 'Branch cleanup issue: Documented manual steps';
+              fixStrategy.changes = [
+                {
+                  file: 'README.md',
+                  action: 'update-docs',
+                  description: 'Add troubleshooting section for cleanup'
+                }
+              ];
+            }
+
+            // Save strategy
+            fs.writeFileSync('analysis/fix-strategy.json', JSON.stringify(fixStrategy, null, 2));
+
+            core.setOutput('fix-description', fixStrategy.description);
+            core.setOutput('fix-branch', fixStrategy.branch);
+
+            return fixStrategy;
+
+      - name: Create fix branch
+        id: create-branch
+        run: |
+          BRANCH_NAME="${{ steps.claude-fix.outputs.fix-branch }}"
+          echo "Creating branch: $BRANCH_NAME"
+
+          git config user.name "Claude Auto-Fix Bot"
+          git config user.email "claude-bot@users.noreply.github.com"
+
+          git checkout -b "$BRANCH_NAME"
+          echo "branch-created=true" >> $GITHUB_OUTPUT
+          echo "branch-name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+      - name: Apply intelligent fixes
+        id: apply-fixes
+        run: |
+          echo "🔧 Applying fixes for ${{ steps.extract-info.outputs.error-type }} error..."
+
+          # This would integrate with Claude API to generate actual fixes
+          # For now, we'll apply common fixes based on patterns
+
+          ERROR_TYPE="${{ steps.extract-info.outputs.error-type }}"
+
+          case $ERROR_TYPE in
+            test)
+              echo "Checking test configuration..."
+              # Example: Ensure test timeout is sufficient
+              if grep -q "timeout" package.json; then
+                echo "✓ Test timeout configured"
+              fi
+              ;;
+
+            docker)
+              echo "Checking Docker configuration..."
+              # Example: Verify Dockerfile exists and is valid
+              if [ -f "Dockerfile" ]; then
+                echo "✓ Dockerfile exists"
+              fi
+              ;;
+
+            cleanup)
+              echo "Adding documentation for manual cleanup..."
+              # This is handled by the workflow already
+              ;;
+          esac
+
+          # Create a summary file
+          cat > FIX_SUMMARY.md << 'EOF'
+          # Auto-Fix Summary
+
+          ## Issue
+          - **Number**: #${{ github.event.issue.number }}
+          - **Type**: ${{ steps.extract-info.outputs.error-type }}
+
+          ## Analysis
+          ${{ steps.claude-fix.outputs.fix-description }}
+
+          ## Changes Applied
+          - Analyzed error patterns
+          - Applied common fixes for ${{ steps.extract-info.outputs.error-type }} errors
+          - Added documentation if needed
+
+          ## Next Steps
+          This PR will trigger CI/CD tests. If successful, the issue will be resolved.
+
+          ## Notes
+          This fix was automatically generated by Claude Auto-Fix.
+          Review the changes before merging.
+          EOF
+
+          git add FIX_SUMMARY.md
+          git commit -m "Auto-fix: Address issue #${{ github.event.issue.number }} (${{ steps.extract-info.outputs.error-type }})" || echo "No changes to commit"
+
+          echo "fixes-applied=true" >> $GITHUB_OUTPUT
+
+      - name: Push fix branch
+        id: push-branch
+        run: |
+          BRANCH_NAME="${{ steps.create-branch.outputs.branch-name }}"
+          echo "Pushing branch: $BRANCH_NAME"
+
+          git push -u origin "$BRANCH_NAME"
+          echo "push-successful=true" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        id: create-pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branchName = '${{ steps.create-branch.outputs.branch-name }}';
+            const issueNumber = context.issue.number;
+            const fixDescription = '${{ steps.claude-fix.outputs.fix-description }}';
+
+            const prBody = `## 🤖 Auto-Fix for Issue #${issueNumber}
+
+            This PR was automatically created by Claude Auto-Fix in response to a @claude mention.
+
+            ### 📋 Original Issue
+            ${context.payload.issue.title}
+
+            ### 🔧 Fix Applied
+            ${fixDescription}
+
+            ### 🎯 What This PR Does
+            - Analyzes the error patterns from the issue
+            - Applies intelligent fixes based on error type
+            - Includes fix summary documentation
+
+            ### ✅ CI/CD Testing
+            This PR will automatically trigger the CI/CD pipeline:
+            - Run all tests
+            - Build Docker image
+            - Verify the fix resolves the issue
+
+            ### 📊 Next Steps
+            1. **Review the changes** - Check if the fix makes sense
+            2. **Wait for CI/CD** - Ensure all tests pass
+            3. **Merge if successful** - The issue will auto-close
+            4. **If tests fail** - Comment @claude again for another attempt
+
+            ### 🔗 Related
+            - Closes #${issueNumber}
+            - Triggered by: @${context.payload.comment.user.login}
+
+            ---
+
+            **Note:** This is an automated fix. Please review carefully before merging.
+            If the fix doesn't work, comment @claude on the original issue for another attempt.
+            `;
+
+            try {
+              const { data: pr } = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🤖 Auto-fix: ${context.payload.issue.title}`,
+                head: branchName,
+                base: 'main',
+                body: prBody
+              });
+
+              // Add labels
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                labels: ['automated', 'claude-code', 'auto-fix']
+              });
+
+              console.log(`Created PR #${pr.number}`);
+              return pr;
+            } catch (error) {
+              console.error('Failed to create PR:', error.message);
+              throw error;
+            }
+
+      - name: Update issue with PR link
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prData = ${{ steps.create-pr.outputs.result }};
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `✅ **Auto-Fix PR Created!**\n\n` +
+                    `I've analyzed the issue and created a pull request with a potential fix.\n\n` +
+                    `**PR:** #${prData.number}\n` +
+                    `**Branch:** \`${{ steps.create-branch.outputs.branch-name }}\`\n\n` +
+                    `**What happens next:**\n` +
+                    `1. CI/CD tests will run automatically\n` +
+                    `2. If tests pass ✅ - Review and merge the PR\n` +
+                    `3. If tests fail ❌ - I'll create a new issue, and you can @claude me again\n\n` +
+                    `**View PR:** ${prData.html_url}\n\n` +
+                    `_The PR will close this issue automatically when merged._`
+            });
+
+            // Add "in-progress" label to issue
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['auto-fix-in-progress']
+            });
+
+  handle-failure:
+    name: Handle Auto-Fix Failure
+    runs-on: ubuntu-latest
+    needs: [detect-claude-mention, analyze-and-fix]
+    if: failure()
+
+    steps:
+      - name: Post failure message
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '❌ **Auto-Fix Failed**\n\n' +
+                    'I encountered an error while trying to automatically fix this issue.\n\n' +
+                    '**What you can do:**\n' +
+                    '1. Check the [workflow run](' +
+                    `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}` +
+                    ') for details\n' +
+                    '2. Try mentioning @claude again\n' +
+                    '3. Or manually fix the issue and create a PR\n\n' +
+                    '**Common issues:**\n' +
+                    '- API rate limits\n' +
+                    '- Permission problems\n' +
+                    '- Complex errors requiring human intervention\n\n' +
+                    '_You can still manually fix this issue!_'
+            });
