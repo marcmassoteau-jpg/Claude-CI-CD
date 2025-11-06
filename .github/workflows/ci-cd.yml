@@ -97,36 +97,47 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check if main branch exists
+        id: check-main
+        run: |
+          if git ls-remote --heads origin main | grep -q main; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Main branch exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Main branch does not exist yet. Skipping PR creation."
+            echo "ℹ️ To enable auto-PR creation, create a main branch first."
+          fi
+
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.ref_name }}
-          base: main
-          title: "🤖 Auto PR: ${{ github.ref_name }}"
-          body: |
-            ## 🚀 Automated Pull Request
+        if: steps.check-main.outputs.exists == 'true'
+        run: |
+          gh pr create \
+            --base main \
+            --head ${{ github.ref_name }} \
+            --title "🤖 Auto PR: ${{ github.ref_name }}" \
+            --body "## 🚀 Automated Pull Request
 
-            This PR was automatically created by the CI/CD pipeline.
+          This PR was automatically created by the CI/CD pipeline.
 
-            ### ✨ Changes
-            - Feature branch: `${{ github.ref_name }}`
-            - Commit: ${{ github.sha }}
+          ### ✨ Changes
+          - Feature branch: \`${{ github.ref_name }}\`
+          - Commit: ${{ github.sha }}
 
-            ### ✅ CI/CD Status
-            - Build: Passed
-            - Tests: Passed
-            - Docker Build: Passed
+          ### ✅ CI/CD Status
+          - Build: Passed
+          - Tests: Passed
+          - Docker Build: Passed
 
-            ### 📋 Checklist
-            - [x] All tests passing
-            - [x] Docker image built successfully
-            - [x] Health checks passing
+          ### 📋 Checklist
+          - [x] All tests passing
+          - [x] Docker image built successfully
+          - [x] Health checks passing
 
-            **Note:** This was created using Claude Code Web version.
-          labels: |
-            automated-pr
-            claude-code
+          **Note:** This was created using Claude Code Web version." \
+            --label "automated-pr,claude-code" || echo "PR may already exist"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Job 4: Deploy (only on main branch after merge)
   deploy:

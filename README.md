@@ -59,9 +59,24 @@ graph LR
 
 ### Step 1: Setup Repository
 
-1. Fork or create this repository
-2. Enable GitHub Actions in repository settings
-3. Ensure branch protection rules are configured for `main` branch
+1. **Fork or create this repository**
+
+2. **Create the main branch** (IMPORTANT - do this first!)
+   - If this is a new repository, you need to create a `main` branch first
+   - You can do this by either:
+     - Creating an initial commit and pushing to main, OR
+     - Merging your first feature branch manually to create main
+   - The automated PR creation will be skipped until main exists
+
+3. **Enable GitHub Actions** in repository settings
+   - Go to Settings > Actions > General
+   - Allow all actions and reusable workflows
+
+4. **Configure branch protection** (recommended)
+   - Go to Settings > Branches
+   - Add branch protection rule for `main`
+   - Require pull request reviews before merging
+   - Require status checks to pass before merging
 
 ### Step 2: Using Claude Code Web (From Your Phone!)
 
