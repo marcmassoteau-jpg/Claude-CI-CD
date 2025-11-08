@@ -1,5 +1,6 @@
 import { motion, useScroll, useTransform } from 'framer-motion';
-import { useRef, ReactNode } from 'react';
+import { useRef } from 'react';
+import type { ReactNode } from 'react';
 import { motion as motionTokens } from '../../config/design-tokens';
 
 type RevealMode = 'fade' | 'slide' | 'scale' | 'slideUp' | 'slideDown';
@@ -48,7 +49,7 @@ export const ScrollReveal = ({
       transition={{
         delay,
         duration: motionTokens.duration.slow / 1000,
-        ease: motionTokens.easing.apple
+        ease: motionTokens.easing.apple as any
       }}
       className={className}
     >
