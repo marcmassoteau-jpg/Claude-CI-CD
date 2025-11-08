@@ -26,6 +26,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate base path configuration
+        run: |
+          echo "🔍 Validating Vite base path matches repository name..."
+
+          # Extract repository name
+          REPO_NAME="${{ github.repository }}"
+          REPO_NAME="${REPO_NAME#*/}"  # Remove owner/ prefix
+          EXPECTED_BASE="/${REPO_NAME}/"
+
+          # Extract base path from vite.config.ts
+          ACTUAL_BASE=$(grep -oP "base:\s*['\"].*?['\"]" landing-page/vite.config.ts | grep -oP "['\"].*?['\"]" | tr -d "'\"")
+
+          echo "Repository: $REPO_NAME"
+          echo "Expected base path: $EXPECTED_BASE"
+          echo "Actual base path: $ACTUAL_BASE"
+
+          if [ "$ACTUAL_BASE" != "$EXPECTED_BASE" ]; then
+            echo "❌ ERROR: Base path mismatch!"
+            echo "The base path in vite.config.ts ($ACTUAL_BASE) does not match the repository name ($EXPECTED_BASE)"
+            echo "This will cause 404 errors on GitHub Pages."
+            echo ""
+            echo "To fix: Update landing-page/vite.config.ts:"
+            echo "  base: '$EXPECTED_BASE',"
+            exit 1
+          fi
+
+          echo "✅ Base path validation passed!"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -62,3 +90,47 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Wait for deployment to propagate
+        run: sleep 10
+
+      - name: Health check deployed site
+        run: |
+          REPO_NAME="${{ github.repository }}"
+          REPO_NAME="${REPO_NAME#*/}"
+          OWNER="${{ github.repository_owner }}"
+          SITE_URL="https://${OWNER}.github.io/${REPO_NAME}/"
+
+          echo "🏥 Running health check on deployed site..."
+          echo "URL: $SITE_URL"
+
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          SUCCESS=false
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES..."
+
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$SITE_URL")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Site is accessible! (HTTP $HTTP_CODE)"
+              SUCCESS=true
+              break
+            else
+              echo "⚠️ Site returned HTTP $HTTP_CODE, retrying in 10 seconds..."
+              sleep 10
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+            fi
+          done
+
+          if [ "$SUCCESS" = false ]; then
+            echo "❌ Health check failed after $MAX_RETRIES attempts"
+            echo "Site URL: $SITE_URL"
+            echo "Last HTTP code: $HTTP_CODE"
+            exit 1
+          fi
+
+          echo ""
+          echo "🎉 Deployment successful and verified!"
+          echo "🌐 Your site is live at: $SITE_URL"
