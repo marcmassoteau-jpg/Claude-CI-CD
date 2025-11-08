@@ -1,5 +1,6 @@
 import { useScroll } from 'framer-motion';
-import { useRef, RefObject } from 'react';
+import { useRef } from 'react';
+import type { RefObject } from 'react';
 
 type ScrollOffset = [string, string];
 
