@@ -8,10 +8,22 @@
     "test": "node test.js",
     "dev": "node server.js"
   },
-  "keywords": ["claude", "cicd", "github-actions", "docker"],
+  "keywords": [
+    "claude",
+    "cicd",
+    "github-actions",
+    "docker"
+  ],
   "author": "Claude Code Demo",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2"
+    "@react-three/drei": "^10.7.6",
+    "@react-three/fiber": "^9.4.0",
+    "@react-three/postprocessing": "^3.0.4",
+    "express": "^4.18.2",
+    "three": "^0.181.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.181.0"
   }
 }

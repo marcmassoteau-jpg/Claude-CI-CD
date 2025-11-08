@@ -2,7 +2,10 @@ import { motion, useScroll, useTransform } from 'framer-motion';
 import { FaMobileAlt, FaRocket, FaGithub } from 'react-icons/fa';
 import { SiClaude } from 'react-icons/si';
 import { Button } from '../ui/Button';
-import { useRef } from 'react';
+import { useRef, useState, useCallback } from 'react';
+import { Canvas3D } from '../three/Canvas3D';
+import { GeometricBackground } from '../three/GeometricBackground';
+import { useDevicePerformance } from '../../hooks/useDevicePerformance';
 
 const Hero = () => {
   const ref = useRef<HTMLElement>(null);
@@ -17,59 +20,90 @@ const Hero = () => {
   const opacity = useTransform(scrollYProgress, [0, 0.5], [1, 0]);
   const scale = useTransform(scrollYProgress, [0, 0.5], [1, 0.95]);
 
+  // Three.js setup
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const devicePerf = useDevicePerformance();
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const { clientX, clientY } = e;
+    const { innerWidth, innerHeight } = window;
+    setMousePosition({
+      x: (clientX / innerWidth - 0.5) * 2,
+      y: (clientY / innerHeight - 0.5) * 2,
+    });
+  }, []);
+
   return (
     <section
       ref={ref}
+      onMouseMove={handleMouseMove}
       className="relative min-h-screen flex items-center justify-center overflow-hidden"
     >
       {/* Enhanced animated background with parallax */}
       <div className="absolute inset-0 overflow-hidden">
-        {/* Gradient mesh background */}
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900" />
+        {/* 3D Geometric Background */}
+        {devicePerf.supportsWebGL && !devicePerf.reducedMotion ? (
+          <Canvas3D
+            dpr={devicePerf.tier === 'high' ? 1.5 : 1}
+            performance={devicePerf.tier}
+          >
+            <GeometricBackground
+              mouseX={mousePosition.x}
+              mouseY={mousePosition.y}
+              performance={devicePerf.tier}
+            />
+          </Canvas3D>
+        ) : (
+          /* Fallback: Gradient background with animated blobs */
+          <>
+            {/* Gradient mesh background */}
+            <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900" />
 
-        {/* Animated blobs with parallax */}
-        <motion.div
-          style={{ y: y1 }}
-          className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20"
-          animate={{
-            scale: [1, 1.2, 1],
-            x: [0, 50, 0],
-            y: [0, 30, 0],
-          }}
-          transition={{
-            duration: 8,
-            repeat: Infinity,
-            ease: 'easeInOut',
-          }}
-        />
-        <motion.div
-          style={{ y: y2 }}
-          className="absolute top-1/3 right-1/4 w-96 h-96 bg-pink-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20"
-          animate={{
-            scale: [1, 1.1, 1],
-            x: [0, -50, 0],
-            y: [0, -30, 0],
-          }}
-          transition={{
-            duration: 10,
-            repeat: Infinity,
-            ease: 'easeInOut',
-          }}
-        />
-        <motion.div
-          style={{ y: y1 }}
-          className="absolute bottom-1/4 left-1/2 w-96 h-96 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl opacity-15"
-          animate={{
-            scale: [1, 1.15, 1],
-            x: [0, 30, 0],
-            y: [0, -20, 0],
-          }}
-          transition={{
-            duration: 12,
-            repeat: Infinity,
-            ease: 'easeInOut',
-          }}
-        />
+            {/* Animated blobs with parallax */}
+            <motion.div
+              style={{ y: y1 }}
+              className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20"
+              animate={{
+                scale: [1, 1.2, 1],
+                x: [0, 50, 0],
+                y: [0, 30, 0],
+              }}
+              transition={{
+                duration: 8,
+                repeat: Infinity,
+                ease: 'easeInOut',
+              }}
+            />
+            <motion.div
+              style={{ y: y2 }}
+              className="absolute top-1/3 right-1/4 w-96 h-96 bg-pink-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20"
+              animate={{
+                scale: [1, 1.1, 1],
+                x: [0, -50, 0],
+                y: [0, -30, 0],
+              }}
+              transition={{
+                duration: 10,
+                repeat: Infinity,
+                ease: 'easeInOut',
+              }}
+            />
+            <motion.div
+              style={{ y: y1 }}
+              className="absolute bottom-1/4 left-1/2 w-96 h-96 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl opacity-15"
+              animate={{
+                scale: [1, 1.15, 1],
+                x: [0, 30, 0],
+                y: [0, -20, 0],
+              }}
+              transition={{
+                duration: 12,
+                repeat: Infinity,
+                ease: 'easeInOut',
+              }}
+            />
+          </>
+        )}
 
         {/* Grid pattern overlay */}
         <div
