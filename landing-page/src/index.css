@@ -5,19 +5,70 @@
 @layer base {
   html {
     scroll-behavior: smooth;
+    scroll-snap-type: y proximity;
   }
 
   body {
     @apply bg-gray-50 text-gray-900;
   }
+
+  section {
+    scroll-snap-align: start;
+    scroll-snap-stop: normal;
+  }
+
+  /* Apple-style custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: rgba(17, 24, 39, 0.3);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(168, 85, 247, 0.7), rgba(236, 72, 153, 0.7));
+    border-radius: 10px;
+    border: 2px solid rgba(17, 24, 39, 0.3);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, rgba(168, 85, 247, 0.9), rgba(236, 72, 153, 0.9));
+  }
+
+  /* Selection styling */
+  ::selection {
+    background-color: rgba(168, 85, 247, 0.3);
+    color: white;
+  }
 }
 
 @layer utilities {
   .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-purple-600 to-blue-600;
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-purple-400 via-pink-400 to-purple-400;
   }
 
   .glow {
     box-shadow: 0 0 20px rgba(112, 87, 255, 0.3);
+  }
+
+  .glow-strong {
+    box-shadow: 0 0 40px rgba(168, 85, 247, 0.5), 0 0 80px rgba(168, 85, 247, 0.3);
+  }
+
+  /* Glassmorphism effect */
+  .glass {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  /* Perspective for 3D transforms */
+  .perspective {
+    perspective: 1000px;
+  }
+
+  .preserve-3d {
+    transform-style: preserve-3d;
   }
 }
